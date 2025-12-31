@@ -17,9 +17,13 @@ from .writing_tools import Pen
 
 _logger = logging.getLogger(__name__)
 
-SCREEN_WIDTH = 1404
-SCREEN_HEIGHT = 1872
-SCREEN_DPI = 226
+# SCREEN_WIDTH = 1404
+# SCREEN_HEIGHT = 1872
+# SCREEN_DPI = 226
+
+SCREEN_WIDTH = 1620
+SCREEN_HEIGHT = 2160
+SCREEN_DPI = 229
 
 SCALE = 72.0 / SCREEN_DPI
 
@@ -115,7 +119,7 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Dict[CrdtId, int]:
 
     :param text: the root text of the remarkable file
     """
-    # Special anchors adjusted based on pen_size_test.strokes.rm
+    # Start with placeholder values for special anchors - will be updated below
     anchor_pos = {
         CrdtId(0, 281474976710654): 100,
         CrdtId(0, 281474976710655): 100,
@@ -123,14 +127,26 @@ def build_anchor_pos(text: tp.Optional[si.Text]) -> tp.Dict[CrdtId, int]:
 
     if text is not None:
         # Save anchor from text
+        # The anchor position should match where text is drawn (at baseline),
+        # so we add line height BEFORE storing the position (same as draw_text)
         doc = TextDocument.from_scene_item(text)
-        ypos = text.pos_y + TEXT_TOP_Y
+        y_offset = TEXT_TOP_Y
         for i, p in enumerate(doc.contents):
+            # Add line height first (to match draw_text behavior)
+            y_offset += LINE_HEIGHTS.get(p.style.value, 70)
+            ypos = text.pos_y + y_offset
             anchor_pos[p.start_id] = ypos
             for subp in p.contents:
                 for k in subp.i:
                     anchor_pos[k] = ypos  # TODO check these anchor are used
-            ypos += LINE_HEIGHTS.get(p.style.value, 70)
+ 
+        # Update special anchors to align with text positions:
+        # - 0xfffffffffffe (281474976710654): top of page -> first text baseline
+        # - 0xffffffffffff (281474976710655): bottom of page -> last text baseline
+        if doc.contents:
+            first_y_offset = TEXT_TOP_Y + LINE_HEIGHTS.get(doc.contents[0].style.value, 70)
+            anchor_pos[CrdtId(0, 281474976710654)] = text.pos_y + first_y_offset
+            anchor_pos[CrdtId(0, 281474976710655)] = text.pos_y + y_offset  # last position
 
     return anchor_pos
 
@@ -275,9 +291,12 @@ def draw_text(text: si.Text, output):
         xpos = text.pos_x
         ypos = text.pos_y + y_offset
         cls = p.style.value.name.lower()
-        if str(p):
+        content = str(p)
+        if content.strip():
             # TODO: this doesn't take into account the CrdtStr.properties (font-weight/font-style)
             if _logger.root.level == logging.DEBUG:
                 output.write(f'\t\t\t<!-- Text line char_id: {p.start_id} -->\n')
-            output.write(f'\t\t\t<text x="{xx(xpos)}" y="{yy(ypos)}" class="{cls}">{str(p).strip()}</text>\n')
+            # Preserve leading spaces by using xml:space="preserve" 
+            # and not stripping the content
+            output.write(f'\t\t\t<text x="{xx(xpos)}" y="{yy(ypos)}" class="{cls}" xml:space="preserve">{content}</text>\n')
     output.write('\t\t</g>\n')
